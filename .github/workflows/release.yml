@@ -4,10 +4,8 @@ on:
   push:
     branches:
       - "main"
-    paths:
-      - "app/build.gradle.kts"
-  tags:
-    - "v*"
+    tags:
+      - "v*"
   workflow_dispatch:
 
 concurrency:
@@ -83,21 +81,18 @@ jobs:
       - name: Run unit tests
         run: ./gradlew --console=plain :innertube:testDebugUnitTest :app:testFossDebugUnitTest --warning-mode summary
 
-      - name: Decode release keystore (if configured)
-        if: ${{ secrets.KEYSTORE != '' }}
-        run: |
-          mkdir -p app/keystore
-          printf '%s' "${{ secrets.KEYSTORE }}" | base64 -d > app/keystore/release.keystore
-
       - name: Build Sonora APK
         env:
           SONORA_APPLICATION_ID: com.sonora.music
           SONORA_APP_NAME: Sonora
+          KEYSTORE_B64: ${{ secrets.KEYSTORE }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ -s app/keystore/release.keystore ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+            mkdir -p app/keystore
+            printf '%s' "$KEYSTORE_B64" | base64 -d > app/keystore/release.keystore
             ./gradlew --console=plain :app:assembleFossRelease --warning-mode summary
           else
             ./gradlew --console=plain :app:assembleFossDebug --warning-mode summary
