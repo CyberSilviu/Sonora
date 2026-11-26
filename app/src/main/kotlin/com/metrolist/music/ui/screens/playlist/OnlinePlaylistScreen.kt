@@ -87,6 +87,9 @@ import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.LocalSyncUtils
 import com.metrolist.music.R
 import com.metrolist.music.constants.HideExplicitKey
+import com.metrolist.music.constants.OnlinePlaylistSortDescendingKey
+import com.metrolist.music.constants.OnlinePlaylistSortType
+import com.metrolist.music.constants.OnlinePlaylistSortTypeKey
 import com.metrolist.music.db.entities.Playlist
 import com.metrolist.music.db.entities.PlaylistEntity
 import com.metrolist.music.db.entities.PlaylistSongMap
@@ -95,6 +98,7 @@ import com.metrolist.music.playback.queues.YouTubePlaylistQueue
 import com.metrolist.music.ui.component.ExpandableText
 import com.metrolist.music.ui.component.IconButton
 import com.metrolist.music.ui.component.LocalMenuState
+import com.metrolist.music.ui.component.SortHeader
 import com.metrolist.music.ui.component.YouTubeListItem
 import com.metrolist.music.ui.menu.YouTubePlaylistMenu
 import com.metrolist.music.ui.menu.YouTubeSelectionSongMenu
@@ -102,6 +106,7 @@ import com.metrolist.music.ui.menu.YouTubeSongMenu
 import com.metrolist.music.ui.utils.backToMain
 import com.metrolist.music.ui.utils.resize
 import com.metrolist.music.utils.makeTimeString
+import com.metrolist.music.utils.rememberEnumPreference
 import com.metrolist.music.utils.rememberPreference
 import com.metrolist.music.viewmodels.OnlinePlaylistViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -125,6 +130,7 @@ fun OnlinePlaylistScreen(
     val mediaMetadata by playerConnection.mediaMetadata.collectAsStateWithLifecycle()
 
     val playlist by viewModel.playlist.collectAsStateWithLifecycle()
+    val rawSongs by viewModel.rawPlaylistSongs.collectAsStateWithLifecycle()
     val songs by viewModel.playlistSongs.collectAsStateWithLifecycle()
     val dbPlaylist by viewModel.dbPlaylist.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
@@ -134,6 +140,16 @@ fun OnlinePlaylistScreen(
     val isPodcastPlaylist = viewModel.isPodcastPlaylist
 
     val hideExplicit by rememberPreference(key = HideExplicitKey, defaultValue = false)
+    val (sortType, onSortTypeChange) =
+        rememberEnumPreference(
+            OnlinePlaylistSortTypeKey,
+            OnlinePlaylistSortType.DEFAULT,
+        )
+    val (sortDescending, onSortDescendingChange) =
+        rememberPreference(
+            OnlinePlaylistSortDescendingKey,
+            true,
+        )
 
     val lazyListState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -251,6 +267,7 @@ fun OnlinePlaylistScreen(
                             OnlinePlaylistHeader(
                                 playlist = playlist,
                                 songs = songs,
+                                rawSongs = rawSongs,
                                 dbPlaylist = dbPlaylist,
                                 coroutineScope = coroutineScope,
                                 continuation = continuation,
@@ -258,9 +275,41 @@ fun OnlinePlaylistScreen(
                                 modifier = Modifier.animateItem(),
                             )
                         }
+
+                        item(key = "controls_row") {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier =
+                                    Modifier
+                                        .padding(start = 16.dp)
+                                        .animateItem(),
+                            ) {
+                                SortHeader(
+                                    sortType = sortType,
+                                    sortDescending = sortDescending,
+                                    onSortTypeChange = onSortTypeChange,
+                                    onSortDescendingChange = onSortDescendingChange,
+                                    sortTypeText = { activeSortType ->
+                                        when (activeSortType) {
+                                            OnlinePlaylistSortType.DEFAULT -> R.string.sort_by_default
+                                            OnlinePlaylistSortType.CREATE_DATE -> R.string.sort_by_create_date
+                                            OnlinePlaylistSortType.NAME -> R.string.sort_by_name
+                                            OnlinePlaylistSortType.ARTIST -> R.string.sort_by_artist
+                                            OnlinePlaylistSortType.ALBUM -> R.string.sort_by_album
+                                            OnlinePlaylistSortType.LENGTH -> R.string.sort_by_length
+                                        }
+                                    },
+                                    showDescending = sortType != OnlinePlaylistSortType.DEFAULT,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
                     }
 
-                    itemsIndexed(filteredSongs) { index, (_, songItem) ->
+                    itemsIndexed(
+                        items = filteredSongs,
+                        key = { _, (_, songItem) -> songItem.id },
+                    ) { index, (_, songItem) ->
                         val onCheckedChange: (Boolean) -> Unit = {
                             if (it) {
                                 selection.add(songItem.id)
@@ -490,6 +539,7 @@ fun OnlinePlaylistScreen(
 private fun OnlinePlaylistHeader(
     playlist: PlaylistItem,
     songs: List<SongItem>,
+    rawSongs: List<SongItem>,
     dbPlaylist: Playlist?,
     coroutineScope: CoroutineScope,
     continuation: String?,
@@ -649,7 +699,7 @@ private fun OnlinePlaylistHeader(
                                     shuffleEndpointParams = playlist.shuffleEndpoint?.params,
                                     radioEndpointParams = playlist.radioEndpoint?.params,
                                 ).toggleLike()
-                            val songMetadata = songs.map { it.toMediaMetadata() }
+                            val songMetadata = rawSongs.map { it.toMediaMetadata() }
                             database.withTransaction {
                                 insert(playlistEntity)
                                 songMetadata.onEach { insert(it) }

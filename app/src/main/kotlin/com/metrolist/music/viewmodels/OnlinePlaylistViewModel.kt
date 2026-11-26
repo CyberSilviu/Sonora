@@ -14,10 +14,15 @@ import com.metrolist.innertube.models.PlaylistItem
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.filterVideoSongs
 import com.metrolist.music.constants.HideVideoSongsKey
+import com.metrolist.music.constants.OnlinePlaylistSortDescendingKey
+import com.metrolist.music.constants.OnlinePlaylistSortType
+import com.metrolist.music.constants.OnlinePlaylistSortTypeKey
 import com.metrolist.music.db.MusicDatabase
+import com.metrolist.music.extensions.toEnum
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.get
 import com.metrolist.music.utils.reportException
+import com.metrolist.music.utils.sortOnlinePlaylistSongs
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -26,8 +31,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -49,7 +58,19 @@ class OnlinePlaylistViewModel @Inject constructor(
     val isPodcastPlaylist = normalizedPlaylistId == "RDPN" || normalizedPlaylistId == "SE"
 
     val playlist = MutableStateFlow<PlaylistItem?>(null)
-    val playlistSongs = MutableStateFlow<List<SongItem>>(emptyList())
+    private val _rawPlaylistSongs = MutableStateFlow<List<SongItem>>(emptyList())
+    val rawPlaylistSongs = _rawPlaylistSongs.asStateFlow()
+    val playlistSongs: StateFlow<List<SongItem>> =
+        combine(
+            _rawPlaylistSongs,
+            context.dataStore.data
+                .map {
+                    (it[OnlinePlaylistSortTypeKey].toEnum(OnlinePlaylistSortType.DEFAULT)) to
+                        (it[OnlinePlaylistSortDescendingKey] ?: true)
+                }.distinctUntilChanged(),
+        ) { songs, (sortType, sortDescending) ->
+            sortOnlinePlaylistSongs(songs, sortType, sortDescending)
+        }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading = _isLoading.asStateFlow()
@@ -105,7 +126,7 @@ class OnlinePlaylistViewModel @Inject constructor(
                             shuffleEndpoint = null,
                             radioEndpoint = null,
                         )
-                        playlistSongs.value = applySongFilters(episodes)
+                        _rawPlaylistSongs.value = applySongFilters(episodes)
                         _isLoading.value = false
                     }.onFailure { throwable ->
                         _error.value = throwable.message ?: "Failed to load new episodes"
@@ -131,7 +152,7 @@ class OnlinePlaylistViewModel @Inject constructor(
                         shuffleEndpoint = null,
                         radioEndpoint = null,
                     )
-                    playlistSongs.value = applySongFilters(episodes)
+                    _rawPlaylistSongs.value = applySongFilters(episodes)
                     _isLoading.value = false
                 } else {
                     // Fall back to local saved episodes when API fails or returns empty
@@ -151,7 +172,7 @@ class OnlinePlaylistViewModel @Inject constructor(
             .onSuccess { playlistPage ->
                 val initialContinuation = playlistPage.songsContinuation ?: playlistPage.continuation
                 playlist.value = playlistPage.playlist
-                playlistSongs.value = applySongFilters(playlistPage.songs)
+                _rawPlaylistSongs.value = applySongFilters(playlistPage.songs)
                 _continuation.value = initialContinuation
                 _isLoading.value = false
                 if (initialContinuation != null) {
@@ -198,7 +219,7 @@ class OnlinePlaylistViewModel @Inject constructor(
             )
             val filtered = applySongFilters(songItems)
             timber.log.Timber.d("[SE_LOCAL] After filter: ${filtered.size} episodes, setting playlistSongs")
-            playlistSongs.value = filtered
+            _rawPlaylistSongs.value = filtered
             _isLoading.value = false
             timber.log.Timber.d("[SE_LOCAL] Done, isLoading=false")
         } else {
@@ -220,7 +241,7 @@ class OnlinePlaylistViewModel @Inject constructor(
                     .onSuccess { playlistContinuationPage ->
                         failures = 0
                         seenTokens += token
-                        playlistSongs.value = applySongFilters(playlistSongs.value + playlistContinuationPage.songs)
+                        _rawPlaylistSongs.value = applySongFilters(_rawPlaylistSongs.value + playlistContinuationPage.songs)
                         _continuation.value = playlistContinuationPage.continuation?.takeIf { it !in seenTokens }
                     }.onFailure { throwable ->
                         ensureActive()

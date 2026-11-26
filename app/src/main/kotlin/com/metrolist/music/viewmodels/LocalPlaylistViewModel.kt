@@ -17,10 +17,10 @@ import com.metrolist.music.constants.PlaylistSongSortType
 import com.metrolist.music.constants.PlaylistSongSortTypeKey
 import com.metrolist.music.db.MusicDatabase
 import com.metrolist.music.db.entities.PlaylistSong
-import com.metrolist.music.extensions.reversed
 import com.metrolist.music.extensions.toEnum
 import com.metrolist.music.utils.SyncUtils
 import com.metrolist.music.utils.dataStore
+import com.metrolist.music.utils.sortPlaylistSongs
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -34,8 +34,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.Collator
-import java.util.Locale
 import javax.inject.Inject
 
 @HiltViewModel
@@ -72,25 +70,7 @@ constructor(
             } else {
                 songs
             }
-            when (sortType) {
-                PlaylistSongSortType.CUSTOM -> filteredSongs
-                PlaylistSongSortType.CREATE_DATE -> filteredSongs.sortedBy { it.map.id }
-                PlaylistSongSortType.NAME -> {
-                    val collator = Collator.getInstance(Locale.getDefault())
-                    collator.strength = Collator.PRIMARY
-                    filteredSongs.sortedWith(compareBy(collator) { it.song.song.title })
-                }
-                PlaylistSongSortType.ARTIST -> {
-                    val collator = Collator.getInstance(Locale.getDefault())
-                    collator.strength = Collator.PRIMARY
-                    filteredSongs.sortedWith(
-                        compareBy<PlaylistSong, String>(collator) { song -> song.song.artists.joinToString("") { it.name } }
-                            .thenBy(collator) { it.song.album?.title.orEmpty() },
-                    )
-                }
-
-                PlaylistSongSortType.PLAY_TIME -> filteredSongs.sortedBy { it.song.song.totalPlayTime }
-            }.reversed(sortDescending && sortType != PlaylistSongSortType.CUSTOM)
+            sortPlaylistSongs(filteredSongs, sortType, sortDescending)
         }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     init {
